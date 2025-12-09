@@ -17,13 +17,93 @@
     }
     .app {
       width: 100%;
-      max-width: 800px;
+      max-width: 960px;
       background: rgba(15,23,42,0.9);
       border-radius: 16px;
       padding: 16px 20px;
       box-shadow: 0 20px 40px rgba(0,0,0,0.4);
       border: 1px solid rgba(148,163,184,0.4);
       backdrop-filter: blur(10px);
+      display: flex;
+      gap: 12px;
+      min-height: 520px;
+    }
+
+    /* 왼쪽: 채팅 리스트 */
+    .sidebar {
+      width: 230px;
+      border-right: 1px solid rgba(51,65,85,0.8);
+      padding-right: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .sidebar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+    .sidebar-btn {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      background: rgba(148,163,184,0.2);
+      color: #e5e7eb;
+    }
+    .sidebar-btn:hover {
+      background: rgba(148,163,184,0.35);
+    }
+    .chat-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      flex: 1;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+    .chat-item {
+      padding: 6px 8px;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .chat-item.active {
+      background: linear-gradient(135deg, #1d4ed8, #22c55e);
+      color: #0f172a;
+    }
+    .chat-item-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chat-item-snippet {
+      font-size: 11px;
+      opacity: 0.8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sidebar-footer {
+      margin-top: 6px;
+      font-size: 10px;
+      color: #9ca3af;
+    }
+
+    /* 오른쪽: 메인 채팅 영역 */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
     .header {
       display: flex;
@@ -52,7 +132,7 @@
       cursor: pointer;
     }
     #log {
-      height: 380px;
+      flex: 1;
       padding: 10px;
       border-radius: 10px;
       background: #020617;
@@ -80,7 +160,7 @@
       border-color: #38bdf8;
       box-shadow: 0 0 0 1px rgba(56,189,248,0.5);
     }
-    button {
+    button.send-btn {
       padding: 10px 16px;
       border-radius: 999px;
       border: none;
@@ -89,7 +169,7 @@
       background: linear-gradient(135deg, #38bdf8, #22c55e);
       color: #0f172a;
     }
-    button:active {
+    button.send-btn:active {
       transform: translateY(1px);
       opacity: 0.9;
     }
@@ -102,39 +182,214 @@
 </head>
 <body>
   <div class="app">
-    <div class="header">
-      <div class="logo">mini-wrtn</div>
-      <div class="badge">local prototype</div>
-    </div>
+    <!-- 왼쪽: 채팅 목록 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">내 채팅</div>
+        <button class="sidebar-btn" id="newChatBtn">+ 새 채팅</button>
+      </div>
+      <ul class="chat-list" id="chatList"></ul>
+      <div class="sidebar-footer">
+        클릭해서 채팅 전환 · 휴지통 버튼으로 삭제
+      </div>
+    </aside>
 
-    <div class="mode-select">
-      <span style="margin-right:8px;">모드:</span>
-      <label>
-        <input type="radio" name="mode" value="chat" checked />
-        채팅
-      </label>
-      <label>
-        <input type="radio" name="mode" value="search" />
-        검색 + LLM
-      </label>
-    </div>
+    <!-- 오른쪽: 메인 채팅 -->
+    <main class="main">
+      <div class="header">
+        <div class="logo">mini-wrtn</div>
+        <div class="badge">render prototype</div>
+      </div>
 
-    <div id="log">
-      <div class="system-line">💬 모드를 선택하고 아래에 질문을 입력해 보세요.</div>
-    </div>
+      <div class="mode-select">
+        <span style="margin-right:8px;">모드:</span>
+        <label>
+          <input type="radio" name="mode" value="chat" checked />
+          채팅
+        </label>
+        <label>
+          <input type="radio" name="mode" value="search" />
+          검색 + LLM
+        </label>
+      </div>
 
-    <div class="input-row">
-      <input
-        id="msg"
-        placeholder="메시지를 입력하고 Enter 또는 '보내기'를 눌러요."
-      />
-      <button onclick="send()">보내기</button>
-    </div>
+      <div id="log">
+        <div class="system-line">
+          💬 왼쪽에서 채팅을 선택하거나 새로 만들고, 아래에 질문을 입력해 보세요.
+        </div>
+      </div>
+
+      <div class="input-row">
+        <input
+          id="msg"
+          placeholder="메시지를 입력하고 Enter 또는 '보내기'를 눌러요."
+        />
+        <button class="send-btn" onclick="send()">보내기</button>
+      </div>
+    </main>
   </div>
 
   <script>
-    const msgInput = document.getElementById("msg");
+    // ======== 채팅 목록 / 로컬 저장 관련 ========
+    const STORAGE_KEY = "mini_wrtn_chats_v1";
+    let chats = [];        // {id, title, logText}
+    let currentChatId = null;
+
+    const chatListEl = document.getElementById("chatList");
     const log = document.getElementById("log");
+    const msgInput = document.getElementById("msg");
+    const newChatBtn = document.getElementById("newChatBtn");
+
+    function loadChatsFromStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          chats = JSON.parse(raw);
+        }
+      } catch (e) {
+        console.warn("로컬 저장소 로드 중 오류:", e);
+      }
+
+      if (!Array.isArray(chats) || chats.length === 0) {
+        // 채팅이 하나도 없으면 기본 채팅 생성
+        const firstId = String(Date.now());
+        chats = [
+          {
+            id: firstId,
+            title: "새 채팅",
+            logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n"
+          },
+        ];
+        currentChatId = firstId;
+        saveChatsToStorage();
+      } else if (!currentChatId) {
+        currentChatId = chats[0].id;
+      }
+    }
+
+    function saveChatsToStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+      } catch (e) {
+        console.warn("로컬 저장소 저장 중 오류:", e);
+      }
+    }
+
+    function renderChatList() {
+      chatListEl.innerHTML = "";
+      chats.forEach((chat) => {
+        const li = document.createElement("li");
+        li.className = "chat-item" + (chat.id === currentChatId ? " active" : "");
+        li.dataset.id = chat.id;
+
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "chat-item-title";
+        titleDiv.textContent = chat.title;
+
+        const snippetDiv = document.createElement("div");
+        snippetDiv.className = "chat-item-snippet";
+        snippetDiv.textContent =
+          (chat.logText || "").split("\n").find((line) => line.trim()) || "대화 없음";
+
+        // 삭제 버튼
+        const deleteBtn = document.createElement("button");
+        deleteBtn.textContent = "🗑";
+        deleteBtn.style.border = "none";
+        deleteBtn.style.background = "transparent";
+        deleteBtn.style.cursor = "pointer";
+        deleteBtn.style.fontSize = "12px";
+        deleteBtn.style.marginLeft = "4px";
+
+        deleteBtn.addEventListener("click", (e) => {
+          e.stopPropagation(); // 채팅 선택 이벤트 막기
+          deleteChat(chat.id);
+        });
+
+        li.appendChild(titleDiv);
+        li.appendChild(snippetDiv);
+        li.appendChild(deleteBtn);
+
+        li.addEventListener("click", () => {
+          selectChat(chat.id);
+        });
+
+        chatListEl.appendChild(li);
+      });
+    }
+
+    function selectChat(id) {
+      currentChatId = id;
+      const chat = chats.find((c) => c.id === id);
+      if (chat) {
+        log.textContent = chat.logText || "";
+      } else {
+        log.textContent = "";
+      }
+      renderChatList();
+    }
+
+    function createNewChat() {
+      const id = String(Date.now());
+      const newChat = {
+        id,
+        title: "새 채팅",
+        logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n",
+      };
+      chats.unshift(newChat); // 맨 위에 추가
+      currentChatId = id;
+      saveChatsToStorage();
+      renderChatList();
+      selectChat(id);
+    }
+
+    function deleteChat(id) {
+      if (!confirm("이 채팅을 삭제할까요?")) return;
+      const idx = chats.findIndex((c) => c.id === id);
+      if (idx === -1) return;
+      chats.splice(idx, 1);
+
+      if (chats.length === 0) {
+        // 다 지워졌으면 새 채팅 하나 생성
+        const firstId = String(Date.now());
+        chats = [
+          {
+            id: firstId,
+            title: "새 채팅",
+            logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n",
+          },
+        ];
+        currentChatId = firstId;
+      } else if (currentChatId === id) {
+        // 현재 채팅을 지운 경우, 첫 번째 걸로 이동
+        currentChatId = chats[0].id;
+      }
+
+      saveChatsToStorage();
+      renderChatList();
+      selectChat(currentChatId);
+    }
+
+    function updateCurrentChatLogFromDOM() {
+      if (!currentChatId) return;
+      const chat = chats.find((c) => c.id === currentChatId);
+      if (!chat) return;
+      chat.logText = log.textContent;
+      // 첫 줄을 제목으로 써도 되고, 아니면 최근 user 메시지 일부를 제목으로 써도 됨
+      const lines = (chat.logText || "").split("\n").filter((l) => l.trim());
+      if (lines.length > 0) {
+        // "👤 나:" 들어간 마지막 줄에서 한 번 제목 뽑아보기
+        const lastUserLine = [...lines].reverse().find((l) => l.startsWith("👤 나:"));
+        if (lastUserLine) {
+          chat.title = lastUserLine.replace("👤 나:", "").trim().slice(0, 15) || "새 채팅";
+        }
+      }
+      saveChatsToStorage();
+      renderChatList(); // 제목/스니펫 반영
+    }
+
+    newChatBtn.addEventListener("click", createNewChat);
+
+    // ======== 채팅 / 검색 모드 공통 전송 함수 ========
 
     function appendLine(text) {
       const div = document.createElement("div");
@@ -174,8 +429,6 @@
             body: JSON.stringify({ query: userText }),
           });
           const data = await res.json();
-
-          // 백엔드에서 answer만 내려주니까 그걸 그대로 사용
           appendLine("🤖 AI(검색): " + data.answer);
         }
       } catch (err) {
@@ -183,6 +436,7 @@
       }
 
       appendLine(""); // 빈 줄
+      updateCurrentChatLogFromDOM();
     }
 
     // Enter로도 전송
@@ -192,6 +446,11 @@
         send();
       }
     });
+
+    // ======== 초기 로딩 ========
+    loadChatsFromStorage();
+    renderChatList();
+    selectChat(currentChatId);
   </script>
 </body>
 </html>

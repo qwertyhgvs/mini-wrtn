@@ -1,11 +1,14 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 import os
 
 from openai import OpenAI
 import requests
 from urllib.parse import quote
+from typing import Dict, List, Optional
+
 
 app = FastAPI()
 
@@ -15,16 +18,25 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # OpenAI 클라이언트
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ===== 대화 메모리 관련 전역 변수 =====
-conversation_history = []  # 최근 대화 일부 (user/assistant 번갈아)
-conversation_summary = ""  # 지금까지의 요약
-messages_since_last_summary = 0  # 마지막 요약 이후 몇 개의 메시지가 쌓였는지
+# ===== 여러 대화방 메모리 관리용 전역 딕셔너리 =====
+# conversation_state = {
+#   "conversation_id_1": {
+#       "history": [ {"role": "user", "content": "..."}, {"role": "assistant", ...}, ... ],
+#       "summary": "지금까지 대화 요약 텍스트",
+#       "messages_since_last_summary": 7,
+#   },
+#   ...
+# }
+conversation_state: Dict[str, Dict] = {}
+
+NOT_FOUND_MSG = "위키백과에서 해당 주제에 대한 요약을 찾지 못했어."
 
 
 # ==== Pydantic 모델들 ====
 
 class ChatRequest(BaseModel):
     message: str
+    conversation_id: Optional[str] = "default"
 
 
 class ChatResponse(BaseModel):
@@ -33,6 +45,7 @@ class ChatResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
+    conversation_id: Optional[str] = "default"
 
 
 class SearchResponse(BaseModel):
@@ -40,43 +53,63 @@ class SearchResponse(BaseModel):
     answer: str
 
 
-NOT_FOUND_MSG = "위키백과에서 해당 주제에 대한 요약을 찾지 못했어."
+# ==== 루트에서 바로 UI로 리다이렉트 ====
 
-
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def root():
-    return {"message": "mini-wrtn 서버 정상 동작 중!"}
+    # Render에서 https://mini-wrtn.onrender.com/ 로 들어오면 바로 index.html 띄우기
+    return RedirectResponse(url="/static/index.html")
+
+
+# ===== 대화방 상태 가져오기 / 초기화 =====
+
+def get_conversation_state(conversation_id: str) -> Dict:
+    """
+    해당 conversation_id에 대한 상태 딕셔너리를 가져오고,
+    없으면 새로 초기화해서 만든 후 반환.
+    """
+    if conversation_id is None:
+        conversation_id = "default"
+
+    if conversation_id not in conversation_state:
+        conversation_state[conversation_id] = {
+            "history": [],                  # 최근 대화들
+            "summary": "",                  # 지금까지 요약
+            "messages_since_last_summary": 0
+        }
+    return conversation_state[conversation_id]
 
 
 # ===== 메모리 관리용 헬퍼 함수들 =====
 
-def add_to_history(role: str, content: str):
+def add_to_history(conversation_id: str, role: str, content: str):
     """
-    대화 히스토리에 한 줄 추가 (role: 'user' 또는 'assistant')
+    해당 conversation_id의 대화 히스토리에 한 줄 추가
+    (role: 'user' 또는 'assistant')
     """
-    global conversation_history, messages_since_last_summary
-    conversation_history.append({"role": role, "content": content})
-    messages_since_last_summary += 1
+    state = get_conversation_state(conversation_id)
+    state["history"].append({"role": role, "content": content})
+    state["messages_since_last_summary"] += 1
 
 
-def summarize_conversation_if_needed():
+def summarize_conversation_if_needed(conversation_id: str):
     """
     대화가 어느 정도 쌓이면(예: 10줄 이상) 요약을 한 번 돌리고,
     요약본을 업데이트한 뒤 히스토리는 최근 몇 줄만 남겨둔다.
     """
-    global conversation_history, conversation_summary, messages_since_last_summary
+    state = get_conversation_state(conversation_id)
 
     SUMMARY_TRIGGER = 10  # 이 개수 이상 쌓이면 요약 시도
     KEEP_RECENT = 5       # 요약 후 히스토리에서 유지할 최근 메시지 수
 
-    if messages_since_last_summary < SUMMARY_TRIGGER:
+    if state["messages_since_last_summary"] < SUMMARY_TRIGGER:
         return
-    if not conversation_history:
+    if not state["history"]:
         return
 
     # 지금까지 쌓인 히스토리 텍스트로 만들기
     history_text = "\n".join(
-        f"{m['role']}: {m['content']}" for m in conversation_history
+        f"{m['role']}: {m['content']}" for m in state["history"]
     )
 
     # 요약용 프롬프트
@@ -87,7 +120,7 @@ def summarize_conversation_if_needed():
         "- 불필요한 인사말이나 사소한 잡담은 최대한 줄여."
     )
     user_content = (
-        f"이전까지의 요약:\n{conversation_summary or '(없음)'}\n\n"
+        f"이전까지의 요약:\n{state['summary'] or '(없음)'}\n\n"
         f"새로운 대화 기록:\n{history_text}\n\n"
         "위 내용을 합쳐서, 앞으로 참고할 수 있도록 짧게 요약해줘."
     )
@@ -100,36 +133,45 @@ def summarize_conversation_if_needed():
         ],
     )
     new_summary = completion.choices[0].message.content.strip()
-    conversation_summary = new_summary
+    state["summary"] = new_summary
 
     # 히스토리는 최근 KEEP_RECENT개만 남기기
-    if len(conversation_history) > KEEP_RECENT:
-        conversation_history = conversation_history[-KEEP_RECENT:]
+    if len(state["history"]) > KEEP_RECENT:
+        state["history"] = state["history"][-KEEP_RECENT:]
 
     # 요약 이후 카운터 초기화
-    messages_since_last_summary = 0
+    state["messages_since_last_summary"] = 0
 
 
-def build_llm_messages(user_msg: str, system_prompt: str, extra_context: str | None = None):
+def build_llm_messages(
+    conversation_id: str,
+    user_msg: str,
+    system_prompt: str,
+    extra_context: Optional[str] = None,
+):
     """
     - system_prompt: 기본 역할/스타일 지시
-    - conversation_summary: 이전까지의 요약
-    - conversation_history: 최근 몇 줄
+    - (대화방별) summary: 이전까지의 요약
+    - (대화방별) history: 최근 몇 줄
     - extra_context: 검색 결과 등 추가 컨텍스트
     를 한 번에 합쳐서 OpenAI로 보낼 messages 리스트 생성
     """
+    state = get_conversation_state(conversation_id)
+    summary = state["summary"]
+    history = state["history"]
+
     messages = []
 
     # 1) 기본 시스템 프롬프트 + 요약된 과거 대화
     full_system = system_prompt
-    if conversation_summary:
-        full_system += "\n\n[요약된 이전 대화]\n" + conversation_summary
+    if summary:
+        full_system += "\n\n[요약된 이전 대화]\n" + summary
     messages.append({"role": "system", "content": full_system})
 
     # 2) 최근 히스토리를 한 덩어리로 제공
-    if conversation_history:
+    if history:
         history_text = "\n".join(
-            f"{m['role']}: {m['content']}" for m in conversation_history
+            f"{m['role']}: {m['content']}" for m in history
         )
         messages.append(
             {
@@ -191,11 +233,12 @@ def search_wikipedia_ko(query: str) -> str:
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest):
+    conversation_id = req.conversation_id or "default"
     user_query = req.query
 
     # 1) 유저의 검색 모드 질문도 히스토리에 기록
-    add_to_history("user", f"[검색모드 질문] {user_query}")
-    summarize_conversation_if_needed()
+    add_to_history(conversation_id, "user", f"[검색모드 질문] {user_query}")
+    summarize_conversation_if_needed(conversation_id)
 
     # 2) 위키 검색
     snippet = search_wikipedia_ko(user_query)
@@ -212,6 +255,7 @@ def search(req: SearchRequest):
     extra_context = snippet if snippet else "검색 결과가 없었어."
 
     messages = build_llm_messages(
+        conversation_id=conversation_id,
         user_msg=user_query,
         system_prompt=system_prompt,
         extra_context=extra_context,
@@ -224,8 +268,8 @@ def search(req: SearchRequest):
     ai_answer = completion.choices[0].message.content.strip()
 
     # 4) AI 답변도 히스토리에 추가
-    add_to_history("assistant", f"[검색모드 답변] {ai_answer}")
-    summarize_conversation_if_needed()
+    add_to_history(conversation_id, "assistant", f"[검색모드 답변] {ai_answer}")
+    summarize_conversation_if_needed(conversation_id)
 
     return SearchResponse(
         answer=ai_answer,
@@ -236,11 +280,12 @@ def search(req: SearchRequest):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
+    conversation_id = req.conversation_id or "default"
     user_msg = req.message
 
     # 1) 대화 히스토리에 유저 메시지 저장
-    add_to_history("user", user_msg)
-    summarize_conversation_if_needed()
+    add_to_history(conversation_id, "user", user_msg)
+    summarize_conversation_if_needed(conversation_id)
 
     # 2) 이번 요청에 사용할 messages 생성
     system_prompt = (
@@ -249,6 +294,7 @@ def chat(req: ChatRequest):
     )
 
     messages = build_llm_messages(
+        conversation_id=conversation_id,
         user_msg=user_msg,
         system_prompt=system_prompt,
     )
@@ -260,7 +306,7 @@ def chat(req: ChatRequest):
     ai_reply = completion.choices[0].message.content.strip()
 
     # 3) AI 답변도 히스토리에 저장
-    add_to_history("assistant", ai_reply)
-    summarize_conversation_if_needed()
+    add_to_history(conversation_id, "assistant", ai_reply)
+    summarize_conversation_if_needed(conversation_id)
 
     return ChatResponse(reply=ai_reply)
