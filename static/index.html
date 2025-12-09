@@ -170,17 +170,8 @@
       color: #0f172a;
       min-width: 80px;
     }
-    button.send-btn:active {
-      transform: translateY(1px);
-      opacity: 0.9;
-    }
-    .system-line {
-      color: #9ca3af;
-      font-size: 12px;
-      margin-bottom: 4px;
-    }
 
-    /* 로딩 인디케이터 */
+    /* 로딩 */
     .loading-indicator {
       margin-top: 4px;
       font-size: 12px;
@@ -200,58 +191,109 @@
       background: #9ca3af;
       animation: blink 1s infinite ease-in-out;
     }
-    .loading-dot:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-    .loading-dot:nth-child(3) {
-      animation-delay: 0.4s;
-    }
+    .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes blink {
       0%, 80%, 100% { opacity: 0.2; }
       40% { opacity: 1; }
     }
+
+    /* 📌 MODEL SELECT MODAL */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+    }
+    .modal {
+      background: #1e293b;
+      padding: 18px;
+      border-radius: 12px;
+      width: 300px;
+      border: 1px solid rgba(148,163,184,0.4);
+      text-align: center;
+    }
+    .modal h3 {
+      margin-top: 0;
+      font-size: 16px;
+      color: #f1f5f9;
+    }
+    .modal select {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      margin-top: 8px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .modal button {
+      margin-top: 14px;
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      background: linear-gradient(135deg, #38bdf8, #22c55e);
+      color: #0f172a;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
+
+  <!-- 📌 모델 선택 모달 -->
+  <div id="modelModal" class="modal-bg">
+    <div class="modal">
+      <h3>모델 선택</h3>
+      <select id="modelSelect">
+        <option value="gpt-5-mini">gpt-5-mini (기본)</option>
+        <option value="gpt-5">gpt-5</option>
+        <option value="gpt-5.1-codex-mini">gpt-5.1-codex-mini</option>
+        <option value="gpt-5-pro">gpt-5-pro</option>
+      </select>
+      <button onclick="confirmModel()">확인</button>
+    </div>
+  </div>
+
   <div class="app">
+
     <!-- 왼쪽: 채팅 목록 -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-title">내 채팅</div>
         <button class="sidebar-btn" id="newChatBtn">+ 새 채팅</button>
       </div>
+
       <ul class="chat-list" id="chatList"></ul>
+
       <div class="sidebar-footer">
-        클릭해서 채팅 전환 · 휴지통 버튼으로 삭제
+        클릭해서 전환 · 휴지통으로 삭제
       </div>
     </aside>
 
-    <!-- 오른쪽: 메인 채팅 -->
+    <!-- 오른쪽: 메인 -->
     <main class="main">
+
       <div class="header">
         <div class="logo">mini-wrtn</div>
         <div class="badge">render prototype</div>
       </div>
 
       <div class="mode-select">
-        <span style="margin-right:8px;">모드:</span>
-        <label>
-          <input type="radio" name="mode" value="chat" checked />
-          채팅
-        </label>
-        <label>
-          <input type="radio" name="mode" value="search" />
-          검색 + LLM
-        </label>
+        모드:
+        <label><input type="radio" name="mode" value="chat" checked> 채팅</label>
+        <label><input type="radio" name="mode" value="search"> 검색 + LLM</label>
       </div>
 
       <div id="log">
         <div class="system-line">
-          💬 왼쪽에서 채팅을 선택하거나 새로 만들고, 아래에 질문을 입력해 보세요.
+          💬 왼쪽에서 채팅을 선택하거나 새로 만들고 질문해보세요.
         </div>
       </div>
 
-      <!-- 생각 중... 로딩 인디케이터 -->
       <div id="loadingIndicator" class="loading-indicator hidden">
         <span>🤖 생각 중</span>
         <div class="loading-dot"></div>
@@ -260,270 +302,243 @@
       </div>
 
       <div class="input-row">
-        <input
-          id="msg"
-          placeholder="메시지를 입력하고 Enter 또는 '보내기'를 눌러요."
-        />
+        <input id="msg" placeholder="메시지를 입력하고 Enter 또는 '보내기'를 눌러요.">
         <button class="send-btn" id="sendBtn" onclick="send()">보내기</button>
       </div>
+
     </main>
   </div>
 
-  <script>
-    // ======== 채팅 목록 / 로컬 저장 관련 ========
-    const STORAGE_KEY = "mini_wrtn_chats_v1";
-    let chats = [];        // {id, title, logText}
-    let currentChatId = null;
+<script>
+/* -------------------------
+     기존 변수 / 저장 구조
+------------------------- */
+const STORAGE_KEY = "mini_wrtn_chats_v1";
+let chats = [];     // { id, title, logText, model }
+let currentChatId = null;
 
-    const chatListEl = document.getElementById("chatList");
-    const log = document.getElementById("log");
-    const msgInput = document.getElementById("msg");
-    const newChatBtn = document.getElementById("newChatBtn");
-    const loadingIndicator = document.getElementById("loadingIndicator");
-    const sendBtn = document.getElementById("sendBtn");
+const chatListEl = document.getElementById("chatList");
+const log = document.getElementById("log");
+const msgInput = document.getElementById("msg");
+const loadingIndicator = document.getElementById("loadingIndicator");
+const sendBtn = document.getElementById("sendBtn");
+const newChatBtn = document.getElementById("newChatBtn");
 
-    let isBusy = false; // 로딩 중인지 여부
+let isBusy = false;
 
-    function loadChatsFromStorage() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          chats = JSON.parse(raw);
-        }
-      } catch (e) {
-        console.warn("로컬 저장소 로드 중 오류:", e);
-      }
+/* -------------------------
+     모델 선택 모달
+------------------------- */
+const modal = document.getElementById("modelModal");
+const modelSelect = document.getElementById("modelSelect");
+let pendingNewChatId = null;
 
-      if (!Array.isArray(chats) || chats.length === 0) {
-        // 채팅이 하나도 없으면 기본 채팅 생성
-        const firstId = String(Date.now());
-        chats = [
-          {
-            id: firstId,
-            title: "새 채팅",
-            logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n"
-          },
-        ];
-        currentChatId = firstId;
-        saveChatsToStorage();
-      } else if (!currentChatId) {
-        currentChatId = chats[0].id;
-      }
-    }
+newChatBtn.addEventListener("click", () => {
+  modal.style.display = "flex";
+});
 
-    function saveChatsToStorage() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
-      } catch (e) {
-        console.warn("로컬 저장소 저장 중 오류:", e);
-      }
-    }
+function confirmModel() {
+  const id = String(Date.now());
+  const selectedModel = modelSelect.value;
 
-    function renderChatList() {
-      chatListEl.innerHTML = "";
-      chats.forEach((chat) => {
-        const li = document.createElement("li");
-        li.className = "chat-item" + (chat.id === currentChatId ? " active" : "");
-        li.dataset.id = chat.id;
+  const newChat = {
+    id,
+    title: "새 채팅",
+    logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n",
+    model: selectedModel
+  };
 
-        const titleDiv = document.createElement("div");
-        titleDiv.className = "chat-item-title";
-        titleDiv.textContent = chat.title;
+  chats.unshift(newChat);
+  currentChatId = id;
 
-        const snippetDiv = document.createElement("div");
-        snippetDiv.className = "chat-item-snippet";
-        snippetDiv.textContent =
-          (chat.logText || "").split("\n").find((line) => line.trim()) || "대화 없음";
+  saveChatsToStorage();
+  renderChatList();
+  selectChat(id);
 
-        // 삭제 버튼
-        const deleteBtn = document.createElement("button");
-        deleteBtn.textContent = "🗑";
-        deleteBtn.style.border = "none";
-        deleteBtn.style.background = "transparent";
-        deleteBtn.style.cursor = "pointer";
-        deleteBtn.style.fontSize = "12px";
-        deleteBtn.style.marginLeft = "4px";
+  modal.style.display = "none";
+}
 
-        deleteBtn.addEventListener("click", (e) => {
-          e.stopPropagation(); // 채팅 선택 이벤트 막기
-          deleteChat(chat.id);
-        });
+/* -------------------------
+     저장 / 로딩
+------------------------- */
+function loadChatsFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) chats = JSON.parse(raw);
+  } catch (e) {}
 
-        li.appendChild(titleDiv);
-        li.appendChild(snippetDiv);
-        li.appendChild(deleteBtn);
+  if (!Array.isArray(chats) || chats.length === 0) {
+    const id = String(Date.now());
+    chats = [
+      { id, title: "새 채팅", logText: "💬 새 채팅입니다.\n", model: "gpt-5-mini" }
+    ];
+    currentChatId = id;
+    saveChatsToStorage();
+  } else if (!currentChatId) {
+    currentChatId = chats[0].id;
+  }
+}
 
-        li.addEventListener("click", () => {
-          selectChat(chat.id);
-        });
+function saveChatsToStorage() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+}
 
-        chatListEl.appendChild(li);
-      });
-    }
+/* -------------------------
+     채팅 목록 렌더링
+------------------------- */
+function renderChatList() {
+  chatListEl.innerHTML = "";
+  chats.forEach(chat => {
+    const li = document.createElement("li");
+    li.className = "chat-item" + (chat.id === currentChatId ? " active" : "");
+    li.dataset.id = chat.id;
 
-    function selectChat(id) {
-      currentChatId = id;
-      const chat = chats.find((c) => c.id === id);
-      if (chat) {
-        log.textContent = chat.logText || "";
-      } else {
-        log.textContent = "";
-      }
-      renderChatList();
-    }
+    const titleDiv = document.createElement("div");
+    titleDiv.className = "chat-item-title";
+    titleDiv.textContent = chat.title;
 
-    function createNewChat() {
-      const id = String(Date.now());
-      const newChat = {
-        id,
-        title: "새 채팅",
-        logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n",
-      };
-      chats.unshift(newChat); // 맨 위에 추가
-      currentChatId = id;
-      saveChatsToStorage();
-      renderChatList();
-      selectChat(id);
-    }
+    const snippetDiv = document.createElement("div");
+    snippetDiv.className = "chat-item-snippet";
+    snippetDiv.textContent =
+      (chat.logText || "").split("\n").find(t => t.trim()) || "대화 없음";
 
-    function deleteChat(id) {
-      if (!confirm("이 채팅을 삭제할까요?")) return;
-      const idx = chats.findIndex((c) => c.id === id);
-      if (idx === -1) return;
-      chats.splice(idx, 1);
+    const del = document.createElement("button");
+    del.textContent = "🗑";
+    del.style.background = "transparent";
+    del.style.border = "none";
+    del.style.cursor = "pointer";
+    del.style.marginLeft = "4px";
 
-      if (chats.length === 0) {
-        // 다 지워졌으면 새 채팅 하나 생성
-        const firstId = String(Date.now());
-        chats = [
-          {
-            id: firstId,
-            title: "새 채팅",
-            logText: "💬 새 채팅입니다. 자유롭게 질문해 보세요.\n",
-          },
-        ];
-        currentChatId = firstId;
-      } else if (currentChatId === id) {
-        // 현재 채팅을 지운 경우, 첫 번째 걸로 이동
-        currentChatId = chats[0].id;
-      }
-
-      saveChatsToStorage();
-      renderChatList();
-      selectChat(currentChatId);
-    }
-
-    function updateCurrentChatLogFromDOM() {
-      if (!currentChatId) return;
-      const chat = chats.find((c) => c.id === currentChatId);
-      if (!chat) return;
-      chat.logText = log.textContent;
-      // 첫 줄을 제목으로 써도 되고, 아니면 최근 user 메시지 일부를 제목으로 써도 됨
-      const lines = (chat.logText || "").split("\n").filter((l) => l.trim());
-      if (lines.length > 0) {
-        // "👤 나:" 들어간 마지막 줄에서 한 번 제목 뽑아보기
-        const lastUserLine = [...lines].reverse().find((l) => l.startsWith("👤 나:"));
-        if (lastUserLine) {
-          chat.title = lastUserLine.replace("👤 나:", "").trim().slice(0, 15) || "새 채팅";
-        }
-      }
-      saveChatsToStorage();
-      renderChatList(); // 제목/스니펫 반영
-    }
-
-    newChatBtn.addEventListener("click", createNewChat);
-
-    // ======== 로딩 인디케이터 제어 ========
-    function setLoading(isLoading) {
-      isBusy = isLoading;
-      if (isLoading) {
-        loadingIndicator.classList.remove("hidden");
-        sendBtn.disabled = true;
-        msgInput.disabled = true;
-      } else {
-        loadingIndicator.classList.add("hidden");
-        sendBtn.disabled = false;
-        msgInput.disabled = false;
-        msgInput.focus();
-      }
-    }
-
-    // ======== 채팅 / 검색 모드 공통 전송 함수 ========
-
-    function appendLine(text) {
-      const div = document.createElement("div");
-      div.textContent = text;
-      log.appendChild(div);
-      log.scrollTop = log.scrollHeight;
-    }
-
-    async function send() {
-      if (isBusy) return; // 요청 처리 중이면 무시
-
-      const userText = msgInput.value.trim();
-      if (!userText) return;
-
-      const mode = document.querySelector('input[name="mode"]:checked').value;
-
-      appendLine("👤 나: " + userText);
-      msgInput.value = "";
-
-      // 현재 선택된 채팅의 id를 그대로 conversation_id로 사용
-      const conversationId = currentChatId || "default";
-
-      setLoading(true);
-
-      try {
-        if (mode === "chat") {
-          // 순수 LLM 채팅
-          const res = await fetch("/chat", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              message: userText,
-              conversation_id: conversationId,
-            }),
-          });
-          const data = await res.json();
-          appendLine("🤖 AI: " + (data.reply || ""));
-        } else if (mode === "search") {
-          // 검색 + LLM 모드
-          const res = await fetch("/search", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              query: userText,
-              conversation_id: conversationId,
-            }),
-          });
-          const data = await res.json();
-          appendLine("🤖 AI(검색): " + (data.answer || ""));
-        }
-      } catch (err) {
-        appendLine("⚠ 오류: " + err);
-      } finally {
-        appendLine(""); // 빈 줄
-        updateCurrentChatLogFromDOM();
-        setLoading(false);
-      }
-    }
-
-    // Enter로도 전송
-    msgInput.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        send();
-      }
+    del.addEventListener("click", e => {
+      e.stopPropagation();
+      deleteChat(chat.id);
     });
 
-    // ======== 초기 로딩 ========
-    loadChatsFromStorage();
-    renderChatList();
-    selectChat(currentChatId);
-  </script>
+    li.appendChild(titleDiv);
+    li.appendChild(snippetDiv);
+    li.appendChild(del);
+
+    li.addEventListener("click", () => selectChat(chat.id));
+    chatListEl.appendChild(li);
+  });
+}
+
+function selectChat(id) {
+  currentChatId = id;
+  const chat = chats.find(c => c.id === id);
+  log.textContent = chat.logText;
+  renderChatList();
+}
+
+function deleteChat(id) {
+  if (!confirm("삭제할까요?")) return;
+
+  const idx = chats.findIndex(c => c.id === id);
+  chats.splice(idx, 1);
+
+  if (chats.length === 0) {
+    const id2 = String(Date.now());
+    chats = [
+      { id: id2, title: "새 채팅", logText: "💬 새 채팅입니다.\n", model: "gpt-5-mini" }
+    ];
+    currentChatId = id2;
+  } else if (currentChatId === id) {
+    currentChatId = chats[0].id;
+  }
+
+  saveChatsToStorage();
+  renderChatList();
+  selectChat(currentChatId);
+}
+
+/* -------------------------
+     로딩 인디케이터
+------------------------- */
+function setLoading(state) {
+  isBusy = state;
+  loadingIndicator.classList.toggle("hidden", !state);
+  sendBtn.disabled = state;
+  msgInput.disabled = state;
+}
+
+/* -------------------------
+     유틸
+------------------------- */
+function appendLine(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+/* -------------------------
+     메시지 보내기
+------------------------- */
+async function send() {
+  if (isBusy) return;
+
+  const input = msgInput.value.trim();
+  if (!input) return;
+
+  const mode = document.querySelector("input[name=mode]:checked").value;
+  const chat = chats.find(c => c.id === currentChatId);
+
+  appendLine("👤 나: " + input);
+  msgInput.value = "";
+
+  setLoading(true);
+
+  try {
+    if (mode === "chat") {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: input,
+          conversation_id: currentChatId,
+          model: chat.model   // 📌 중요! 채팅방 모델 전달
+        })
+      });
+      const data = await res.json();
+      appendLine("🤖 AI: " + data.reply);
+
+    } else {
+      const res = await fetch("/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: input,
+          conversation_id: currentChatId
+        })
+      });
+      const data = await res.json();
+      appendLine("🤖 AI(검색): " + data.answer);
+    }
+  } catch (err) {
+    appendLine("⚠ 오류: " + err);
+  }
+
+  const c = chats.find(x => x.id === currentChatId);
+  c.logText = log.textContent;
+  saveChatsToStorage();
+  renderChatList();
+
+  setLoading(false);
+}
+
+/* Enter로 전송 */
+msgInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+/* 초기 실행 */
+loadChatsFromStorage();
+renderChatList();
+selectChat(currentChatId);
+
+</script>
 </body>
 </html>
