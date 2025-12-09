@@ -54,6 +54,9 @@ def root():
 # ===== 대화방 상태 가져오기 =====
 
 def get_conversation_state(conversation_id: str) -> Dict:
+    if conversation_id is None:
+        conversation_id = "default"
+
     if conversation_id not in conversation_state:
         conversation_state[conversation_id] = {
             "history": [],
@@ -84,7 +87,9 @@ def summarize_conversation_if_needed(conversation_id: str):
     if not state["history"]:
         return
 
-    history_text = "\n".join(f"{m['role']}: {m['content']}" for m in state["history"])
+    history_text = "\n".join(
+        f"{m['role']}: {m['content']}" for m in state["history"]
+    )
 
     system_prompt = (
         "너는 대화를 간단하게 요약하는 도우미야.\n"
@@ -109,7 +114,6 @@ def summarize_conversation_if_needed(conversation_id: str):
             ],
         )
         state["summary"] = completion.choices[0].message.content.strip()
-
     except Exception as e:
         state["summary"] = f"(요약 실패: {e})"
 
@@ -120,7 +124,12 @@ def summarize_conversation_if_needed(conversation_id: str):
 
 # ===== messages 생성 =====
 
-def build_llm_messages(conversation_id: str, user_msg: str, system_prompt: str, extra_context=None):
+def build_llm_messages(
+    conversation_id: str,
+    user_msg: str,
+    system_prompt: str,
+    extra_context: Optional[str] = None,
+):
     state = get_conversation_state(conversation_id)
     summary = state["summary"]
     history = state["history"]
@@ -134,22 +143,27 @@ def build_llm_messages(conversation_id: str, user_msg: str, system_prompt: str, 
     messages.append({"role": "system", "content": full_system})
 
     if history:
-        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in history)
-        messages.append({
-            "role": "system",
-            "content": "[최근 대화 일부]\n" + history_text,
-        })
+        history_text = "\n".join(
+            f"{m['role']}: {m['content']}" for m in history
+        )
+        messages.append(
+            {
+                "role": "system",
+                "content": "[최근 대화 일부]\n" + history_text,
+            }
+        )
 
     user_parts = []
     if extra_context:
         user_parts.append(f"추가 컨텍스트:\n{extra_context}")
-
     user_parts.append(f"사용자 질문: {user_msg}")
 
-    messages.append({
-        "role": "user",
-        "content": "\n\n".join(user_parts)
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": "\n\n".join(user_parts),
+        }
+    )
 
     return messages
 
@@ -169,7 +183,7 @@ def search_wikipedia_ko(query: str) -> str:
     except Exception as e:
         return f"검색 오류: {e}"
 
-    if "대한민국 대통령" in query:
+    if "대한민국 대통령" in query or "한국 대통령" in query:
         return search_wikipedia_ko("대한민국의 대통령")
     if "미국 대통령" in query:
         return search_wikipedia_ko("미국 대통령")
@@ -181,7 +195,7 @@ def search_wikipedia_ko(query: str) -> str:
 
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest):
-    conversation_id = req.conversation_id
+    conversation_id = req.conversation_id or "default"
     user_query = req.query
 
     add_to_history(conversation_id, "user", f"[검색 질문] {user_query}")
@@ -198,17 +212,16 @@ def search(req: SearchRequest):
         conversation_id,
         user_query,
         system_prompt,
-        extra_context=snippet
+        extra_context=snippet,
     )
 
-    # 검색 모델
+    # 검색 모델 (chat.completions 사용 가능 모델)
     try:
         completion = client.chat.completions.create(
             model="gpt-4o-mini-search-preview",
             messages=messages,
         )
         ai_answer = completion.choices[0].message.content.strip()
-
     except Exception as e:
         ai_answer = f"검색 중 오류 발생: {e}"
 
@@ -222,7 +235,7 @@ def search(req: SearchRequest):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
-    conversation_id = req.conversation_id
+    conversation_id = req.conversation_id or "default"
     user_msg = req.message
 
     add_to_history(conversation_id, "user", user_msg)
@@ -230,7 +243,7 @@ def chat(req: ChatRequest):
 
     state = get_conversation_state(conversation_id)
 
-    # ★ 방 모델 업데이트
+    # ★ 방 모델 업데이트 (첫 요청에서만 넘어오게 프론트 설계하면 됨)
     if req.model is not None:
         state["model"] = req.model
 
@@ -241,15 +254,39 @@ def chat(req: ChatRequest):
         "이전 대화 요약과 최근 맥락을 활용해 자연스럽게 이어서 답해."
     )
 
-    messages = build_llm_messages(conversation_id, user_msg, system_prompt)
+    messages = build_llm_messages(
+        conversation_id,
+        user_msg,
+        system_prompt,
+    )
 
-    # === ★ 여기 try/except이 핵심! ===
+    # === 핵심: 모델에 따라 chat.completions vs responses 분기 ===
     try:
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-        )
-        ai_reply = completion.choices[0].message.content.strip()
+        if model_name == "gpt-5-pro":
+            # gpt-5-pro는 v1/responses 전용
+            response = client.responses.create(
+                model=model_name,
+                # responses API는 messages 스타일도 input으로 받을 수 있음
+                input=messages,
+                max_output_tokens=1024,
+            )
+
+            # 안전하게 텍스트 뽑기
+            ai_reply = ""
+            try:
+                ai_reply = response.output[0].content[0].text.strip()
+            except Exception:
+                # 혹시 구조가 다르면 fallback
+                ai_reply = (getattr(response, "output_text", "") or "").strip()
+                if not ai_reply:
+                    ai_reply = "응답을 해석하는 중 오류가 발생했어."
+        else:
+            # 일반 chat.completions 모델들
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+            )
+            ai_reply = completion.choices[0].message.content.strip()
 
     except Exception as e:
         ai_reply = f"서버 또는 모델 오류 발생: {e}"
@@ -258,3 +295,4 @@ def chat(req: ChatRequest):
     summarize_conversation_if_needed(conversation_id)
 
     return ChatResponse(reply=ai_reply)
+
