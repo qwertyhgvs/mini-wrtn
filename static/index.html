@@ -168,6 +168,7 @@
       font-weight: 600;
       background: linear-gradient(135deg, #38bdf8, #22c55e);
       color: #0f172a;
+      min-width: 80px;
     }
     button.send-btn:active {
       transform: translateY(1px);
@@ -177,6 +178,37 @@
       color: #9ca3af;
       font-size: 12px;
       margin-bottom: 4px;
+    }
+
+    /* 로딩 인디케이터 */
+    .loading-indicator {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #9ca3af;
+      min-height: 16px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .loading-indicator.hidden {
+      visibility: hidden;
+    }
+    .loading-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 999px;
+      background: #9ca3af;
+      animation: blink 1s infinite ease-in-out;
+    }
+    .loading-dot:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+    .loading-dot:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: 0.2; }
+      40% { opacity: 1; }
     }
   </style>
 </head>
@@ -219,12 +251,20 @@
         </div>
       </div>
 
+      <!-- 생각 중... 로딩 인디케이터 -->
+      <div id="loadingIndicator" class="loading-indicator hidden">
+        <span>🤖 생각 중</span>
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+      </div>
+
       <div class="input-row">
         <input
           id="msg"
           placeholder="메시지를 입력하고 Enter 또는 '보내기'를 눌러요."
         />
-        <button class="send-btn" onclick="send()">보내기</button>
+        <button class="send-btn" id="sendBtn" onclick="send()">보내기</button>
       </div>
     </main>
   </div>
@@ -239,6 +279,10 @@
     const log = document.getElementById("log");
     const msgInput = document.getElementById("msg");
     const newChatBtn = document.getElementById("newChatBtn");
+    const loadingIndicator = document.getElementById("loadingIndicator");
+    const sendBtn = document.getElementById("sendBtn");
+
+    let isBusy = false; // 로딩 중인지 여부
 
     function loadChatsFromStorage() {
       try {
@@ -389,6 +433,21 @@
 
     newChatBtn.addEventListener("click", createNewChat);
 
+    // ======== 로딩 인디케이터 제어 ========
+    function setLoading(isLoading) {
+      isBusy = isLoading;
+      if (isLoading) {
+        loadingIndicator.classList.remove("hidden");
+        sendBtn.disabled = true;
+        msgInput.disabled = true;
+      } else {
+        loadingIndicator.classList.add("hidden");
+        sendBtn.disabled = false;
+        msgInput.disabled = false;
+        msgInput.focus();
+      }
+    }
+
     // ======== 채팅 / 검색 모드 공통 전송 함수 ========
 
     function appendLine(text) {
@@ -399,6 +458,8 @@
     }
 
     async function send() {
+      if (isBusy) return; // 요청 처리 중이면 무시
+
       const userText = msgInput.value.trim();
       if (!userText) return;
 
@@ -406,6 +467,11 @@
 
       appendLine("👤 나: " + userText);
       msgInput.value = "";
+
+      // 현재 선택된 채팅의 id를 그대로 conversation_id로 사용
+      const conversationId = currentChatId || "default";
+
+      setLoading(true);
 
       try {
         if (mode === "chat") {
@@ -415,10 +481,13 @@
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ message: userText }),
+            body: JSON.stringify({
+              message: userText,
+              conversation_id: conversationId,
+            }),
           });
           const data = await res.json();
-          appendLine("🤖 AI: " + data.reply);
+          appendLine("🤖 AI: " + (data.reply || ""));
         } else if (mode === "search") {
           // 검색 + LLM 모드
           const res = await fetch("/search", {
@@ -426,17 +495,21 @@
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ query: userText }),
+            body: JSON.stringify({
+              query: userText,
+              conversation_id: conversationId,
+            }),
           });
           const data = await res.json();
-          appendLine("🤖 AI(검색): " + data.answer);
+          appendLine("🤖 AI(검색): " + (data.answer || ""));
         }
       } catch (err) {
         appendLine("⚠ 오류: " + err);
+      } finally {
+        appendLine(""); // 빈 줄
+        updateCurrentChatLogFromDOM();
+        setLoading(false);
       }
-
-      appendLine(""); // 빈 줄
-      updateCurrentChatLogFromDOM();
     }
 
     // Enter로도 전송
